@@ -1,0 +1,59 @@
+#!/bin/sh
+
+checkUser() {
+    for pid in `pgrep -u $1`; do
+        if fgrep -qs "cpu,cpuacct:/user/$user" /proc/$pid/cgroup; then
+            [ x$verbose = xyes ] && \
+                echo + $2 "[$pid]" `head -c 70 /proc/$pid/cmdline`
+        else
+            echo - $2 "[$pid]" `head -c 70 /proc/$pid/cmdline`
+            stray=yes
+        fi
+    done
+}
+
+while getopts avh opt; do
+    case $opt in
+        a)
+            all=yes
+            ;;
+        v)
+            verbose=yes
+            ;;
+        *)
+            echo List stray processes, i.e. processes that are not confined in a cgroup.
+            echo Usage:  ${0##*/} '[-v] [-a | <username>]'
+            echo '       -v also report confined processes'
+            echo '       -a list stray processes for all users'
+            echo '       If neither -a nor <username> is given list stray processes'
+            echo '           of current user.'
+            exit
+    esac
+done
+shift `expr $OPTIND - 1`
+
+if [ x$all = xyes ]; then
+    #
+    # check all logged in users
+    #
+    for user in `w -uhso | awk '{print $1}' | sort -u`; do
+        checkUser $user $user
+    done
+    [ x$stray = x -a x$verbose = x ] && echo No stray processes found.
+    exit;
+fi
+
+if [ x$1 = x ]; then
+    user=$LOGNAME
+else
+    if id $1 >/dev/null 2>&1; then
+        user=$1
+    else
+        echo No such user: $1
+        exit 1
+    fi
+fi
+
+checkUser $user
+[ x$stray = x -a x$verbose = x ] && echo No stray processes found.
+
