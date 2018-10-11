@@ -33,6 +33,8 @@ scheduling feature of the Linux kernel which is controlled by the
 cgoups API. With fair share scheduling enabled, a user can aquire all
 CPU resources he/she wants as long as there is idle time on the
 system. When CPU time is exhausted the scheduler splits CPU time
+
+
 equally across all demanding users. In other words the user cannot
 single-handedly slow down the whole system.
 
@@ -69,7 +71,9 @@ Systemd has its very own ideas and
 concepts for the cgroup hierarchy, and it does not like other players
 messing with `/sys/fs/cgroup`. Actually, systemd takes away the whole cgroup feature
 from the system administrator completely. One can register a service and have systemd delegate cgroup resource
-control for that cgroup subtree only. And that's is.
+control for that cgroup subtree only. And that's it.
+
+#### Divide et impera
 
 `systemd-cgls(1)` shows the cgroup structure as set up initially by systemd itself.
 `-.slice` is the root slice, which is divided into the `user.slice` and the `system.slice`.
@@ -110,4 +114,24 @@ session and an independent ssh session.
     │   │ ├─at-spi-dbus-bus.service
     │   │ │ ├─2629 /usr/lib/at-spi2-core/at-spi-bus-launcher
     [...]
+
+#### Good leaders delegate
+
+Systemd creates a cgroup for each unit, i.e. every slice, scope and service in the tree above, and puts all
+processes belonging to that unit into the corresponding cgroup. Processes cannot be assigned to different cgroups with the same controller. So if you have created your own cgroup cpu:/user/usera and attached all of usera's processes to that cgroup, systemd will grab them and put them back into its own cgroup hierarchy. Unless you use the [delegation](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md) feature of systemd units. By properly setting the `Delegate` property, you can exclude a unit (and all its sub-units) from systemd's cgroup resource control.
+
+Unfortunately the delegate feature [is not available for slices](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md#some-donts) by design. Otherwise it would be quite simple to delegate the cgroup resource control for the whole `user.slice` and deploy fair share scheduling as mentioned above. But it even gets worse. It seems that scopes are not templateable like the `user@.service`. In the tree above you can template the `user@12345.service` (*any* `user@.service`, i.e.) by creating /etc/systemd/system/user@.service. In that file you can use the `Delegate` property and systemd would not touch the processes in that unit any more. But we need *all* the user's processses under our control.
+
+Another way of setting properties of systemd units is `systemctl set-property`, but in this case it will not help at all as just the Delegate property is not settable:
+
+    root# systemctl show user@12345.service
+    [...]
+    IPEgressPackets=18446744073709551615
+    Delegate=yes
+    CPUAccounting=no
+    [...]
+    root# systemctl set-property user@12345.service Delegate=pids
+    Failed to set unit properties on user@12345.service:
+    Cannot set property DelegateControllers, or unknown property.
+
 
