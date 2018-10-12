@@ -1,7 +1,7 @@
 # fss-tools
 Tools and scripts for deploying the Linux fair share scheduler on
 multi-user systems, scheduling users against each other instead of processes.
-This covers the deployment on [ThinLinc](https://www.cendio.com/ "ThinLinc by Cendio") agent hosts. Other scenarios may apply.
+This covers the deployment on [ThinLinc](https://www.cendio.com/thinlinc/what-is-thinlinc "ThinLinc by Cendio") agent hosts. Other scenarios may apply.
 
 The shell scripts [`confine_user`](doc/confine_user.md) and [`tl-wrapper`](doc/tl-wrapper.md) are used to set up the user cgroup during the login process.
 
@@ -18,7 +18,7 @@ and scientific applications) for researchers and teachers.
 
 ### Use Case
 
-Formerly based on SunRay technology (using Solaris' FSS), we now use a ThinLinc-4.9 setup
+Formerly based on Sun Ray technology (using Solaris' FSS), we now use a ThinLinc-4.9 setup
 with 5 VSM agents (each 56 Cores, 376GB RAM). Our approach uses
 Ubuntu-18.04 on the bare metal and each VSM agent is running inside
 an LXD-3.0 container, also with an Ubuntu-18.04 user space. This
@@ -75,7 +75,7 @@ Until `systemd(1)` comes into play.
 
 Systemd has its very own ideas and
 concepts for the cgroup hierarchy, and it does not like other players
-messing with `/sys/fs/cgroup`. Actually, systemd takes away the whole cgroup feature
+messing with `/sys/fs/cgroup`. Actually, systemd takes away the cgroup feature
 from the system administrator completely. One can register a service and have systemd delegate cgroup resource
 control for that cgroup subtree only. And that's it.
 
@@ -124,9 +124,9 @@ session and an independent ssh session.
 #### Good leaders delegate
 
 Systemd creates a cgroup for each unit, i.e. every slice, scope and service in the tree above, and puts all
-processes belonging to that unit into the corresponding cgroup. Processes cannot be assigned to different cgroups with the same controller. So if you have created your own cgroup `cpu:/user/usera` and attached all of usera's processes to that cgroup, systemd will grab them and put them back into its own cgroup hierarchy -- unless you use the [delegation](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md) feature of systemd units. By properly setting the `Delegate` property, you can exclude a unit (and all its sub-units) from systemd's cgroup resource control.
+processes belonging to that unit into the corresponding cgroup. Processes cannot be assigned to different cgroups with the same controller. So if you have created your own cgroup `cpu:/user/usera` and attached all of usera's processes to that cgroup, systemd will grab them and put them back into its own cgroup hierarchy -- unless you use the [delegation](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md) feature of systemd units. By properly setting the `Delegate` property you can exclude a unit (and all its sub-units) from systemd's cgroup resource control.
 
-Unfortunately the delegate feature [is not available for slices](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md#some-donts) by design. Otherwise it would be quite simple to delegate the cgroup resource control for the whole `user.slice` and deploy fair share scheduling as mentioned above. But it even gets worse. It seems that scopes are not templateable like the `user@.service`. In the tree above you can template the `user@12345.service` (*any* `user@.service`, i.e.) by creating `/etc/systemd/system/user@.service`. In that file you can use the `Delegate` property and systemd would not touch the processes in that unit any more. But we need *all* the user's processes under our control.
+Unfortunately, the delegate feature [is not available for slices](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md#some-donts), by design. Otherwise it would be quite simple to delegate the cgroup resource control for the whole `user.slice` and deploy fair share scheduling as mentioned above. But it even gets worse. It seems that scopes are not templateable like the `user@.service`. In the tree above you can template the `user@12345.service` (*any* `user@.service`, i.e.) by creating `/etc/systemd/system/user@.service`. In that file you can use the `Delegate` property and systemd would not touch the processes in that unit any more. But we need *all* the user's processes under our control.
 
 Another way of setting properties of systemd units is `systemctl set-property`, but in this case it will not help at all as just the Delegate property is not settable:
 
