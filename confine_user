@@ -1,0 +1,69 @@
+#!/bin/sh
+#
+# This script must be run as root.
+#
+# Normal users should be enabled to run this via sudo(1m) and
+# only can confine themselves. Root may run this directly to
+# (re)confine any user.
+#
+# This should be called once during the login process.
+#
+# needs: cgroup-tools
+#
+# (c) 2019 Bjorn Fischer, CeBiTec, Bielefeld University
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#
+# Let users have 10% of RAM and 512 cpu shares
+#
+mem_frac=10
+cpu_shares=512
+
+umask 0022
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+if [ `id -u` -ne 0 ]; then
+    echo This script must be run as root.
+    exit 1
+fi
+
+#
+# root may (re)confine any user
+#
+if [ x$SUDO_USER = x ]; then
+    if [ x$1 = x ]; then
+        echo Usage: ${0##*/} username
+        exit 1
+    else
+        SUDO_USER=$1
+    fi
+fi
+
+#
+# CAVEAT: In LXD containers /proc/meminfo somtimes reports
+#         incorrect values
+#
+totalk=`cat /proc/meminfo | fgrep MemTotal: | awk '{ print $2 }'`
+memk=`expr $totalk / $mem_frac`
+
+# This is optional:
+#cgdelete -g cpu,memory:/user/$SUDO_USER
+
+cgcreate -g cpu,memory:/user/$SUDO_USER
+cgset -r cpu.shares=$cpu_shares /user/$SUDO_USER
+cgset -r memory.limit_in_bytes=${memk}k /user/$SUDO_USER
+
+cgclassify -g cpu,memory:/user/$SUDO_USER `pgrep -u $SUDO_USER`
+

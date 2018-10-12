@@ -1,0 +1,19 @@
+#!/bin/sh
+#
+#  sshd/ForceCommand wrapper which deactivates screensaver on reconnect
+#  suggested by Cendio for [issue19639]
+#
+
+/usr/bin/sudo /usr/local/bin/confine_user
+
+if [ -z "${SSH_ORIGINAL_COMMAND}" ]; then
+    # No ssh command set, start user shell
+    exec $(getent passwd ${LOGNAME} | cut -d: -f7) -l
+else
+    if [ "${SSH_ORIGINAL_COMMAND}" = "thinlinc-login dummy" ]; then
+	# This is the actual agent connection for a ThinLinc client,
+	# kill the running screensaver.
+	/usr/bin/pkill -u ${LOGNAME} --signal HUP screensaver
+    fi
+    exec $(getent passwd ${LOGNAME} | cut -d: -f7) -c "${SSH_ORIGINAL_COMMAND}"
+fi

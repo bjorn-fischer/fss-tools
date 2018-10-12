@@ -1,0 +1,515 @@
+#!/usr/bin/env python3
+#
+# (c) 2019 Bjorn Fischer, CeBiTec, Bielefeld University
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import os
+import sys
+import signal
+import pwd
+import time
+
+from pprint import pprint
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, GObject, Pango
+
+#
+# catch SIGINT
+#
+def sigIntHandler(sig, frame):
+    print()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, sigIntHandler)
+
+#
+# helpers
+#
+sysHz = os.sysconf('SC_CLK_TCK')
+sysClkTcks = sysHz * os.cpu_count()
+
+def getUids():
+    """get a list of uids with processes in cpu:cpuacct:/user/<logname> cgroups"""
+
+    users = {}
+
+    for pid in list(filter(lambda s: s.isnumeric(), os.listdir('/proc'))):
+        try:
+            cgroupFile = open('/proc/' + pid + '/cgroup', 'r')
+            cgroups = list(
+                map(lambda s: s.split(':'),
+                cgroupFile.read().strip().split('\n')))
+            for cgroup in cgroups:
+                if cgroup[1] == 'cpu,cpuacct' and cgroup[2][:6] == '/user/':
+                    users[cgroup[2][6:]] = 1
+            cgroupFile.close()
+        except FileNotFoundError:
+            # ignore ENOENT -- the process may already have terminated
+            pass
+
+    return list(map(lambda s: pwd.getpwnam(s)[2], users))
+
+
+def getPids(uid = None, username = None):
+
+    if username == None:
+        if uid == None:
+            uid = os.getuid()
+        username = pwd.getpwuid(uid)[0]
+    else:
+        uid = pwd.getpwnam(username)[2]
+
+    taskFile = open('/sys/fs/cgroup/cpu,cpuacct/user/' + username + '/cgroup.procs', 'r')
+    pids = list(map(lambda x: int(x), taskFile.read().strip().split('\n')))
+    taskFile.close()
+    return pids
+
+
+def cpuSysPercent(slices):
+    """compute cpu time wrt theoretically available slices on system"""
+    percent = int(slices * 100 / sysClkTcks)
+    if percent > 100:
+        percent = 100
+    return percent
+
+
+def cpuCorePercent(slices):
+    """compute cpu time wrt available slices on a core"""
+    percent = int(slices * 100 / sysHz)
+    if percent > 100:
+        percent = 100
+    return percent
+
+
+class DataSampler:
+    """Sample f(t) data and compute f(t)/d(t) or mean(f(t0..t1))"""
+
+    def __init__(self, samples = 60):
+        self.samples = samples
+        self.values = [None] * self.samples;
+        self.times  = [None] * self.samples;
+
+    def sample(self, value):
+        self.values = [value]       + self.values[:-1]
+        self.times  = [time.time()] + self.times[:-1]
+
+    def getAverage(self, dt):
+        pass
+
+    def getDelta(self, dt = -1):
+        if dt < 0:
+            if self.values[0] == None or self.values[1] == None:
+                return 0.0
+            return (self.values[0] - self.values[1]) / (self.times[0] - self.times[1])
+        else:
+            for i in range(1, self.samples):
+                if self.values[i] == None:
+                    if self.values[0] == None or i == 1:
+                        return 0.0
+                    else:
+                        return (self.values[0] - self.values[i-1]) / (self.times[0] - self.times[i-1])
+                if self.times[0] - self.times[i] >= dt:
+                    return (self.values[0] - self.values[i]) / (self.times[0] - self.times[i])
+
+
+class UserInfo:
+    """Retrieve and hold information on a user cgroup"""
+
+    def __init__(self, uid=None, username=None, samples=60):
+        if username == None:
+            if uid == None:
+                uid = os.getuid()
+            username = pwd.getpwuid(uid)[0]
+        else:
+            uid = pwd.getpwnam(username)[2]
+        self.uid = uid
+        self.username = username
+        self.iter = None
+
+        self.cpuUser = DataSampler(samples)
+        self.cpuSystem = DataSampler(samples)
+        self.sampleData()
+
+    def getTypes():
+        return (str, int, int, int, int, int)
+
+    def getData(self):
+        memUsagePercent = int(self.memUsage * 100 / self.memLimit)
+        if memUsagePercent > 100:
+            memUsagePercent = 100
+        memCachePercent = int(self.memCache * 100 / self.memLimit)
+        if memCachePercent > 100:
+            memCachePercent = 100;
+        return [
+            self.username,
+            self.uid,
+            cpuSysPercent(self.cpuUser.getDelta()),
+            cpuSysPercent(self.cpuUser.getDelta(10)),
+            memUsagePercent,
+            memCachePercent,
+        ]
+
+    def sampleData(self):
+        cpuStatFile = open(
+            '/sys/fs/cgroup/cpu,cpuacct/user/' +
+            self.username + '/cpuacct.stat', 'r')
+        for cpuStat in map(lambda s: s.split(' '), cpuStatFile.read().strip().split('\n')):
+            if cpuStat[0] == 'user':
+                self.cpuUser.sample(int(cpuStat[1]))
+                next
+            if cpuStat[0] == 'system':
+                self.cpuSystem.sample(int(cpuStat[1]))
+        cpuStatFile.close()
+
+        memStatFile = open(
+            '/sys/fs/cgroup/memory/user/' +
+            self.username + '/memory.stat', 'r')
+        lines = memStatFile.read().strip().split()
+        memStat = { k: v for k,v in zip(lines[::2], lines[1::2]) }
+
+        self.memUsage = int(memStat['rss']) + int(memStat['rss_huge'])
+        self.memCache = int(memStat['cache'])
+        self.memLimit = int(memStat['hierarchical_memory_limit'])
+
+        memStatFile.close()
+
+
+class ProcInfo:
+    """Retrieve and hold information on a process"""
+
+    procState = {
+        'S' : 'Sleeping',
+        'R' : 'Running',
+        'Z' : 'Zombie',
+        'T' : 'Stopped',
+        'D' : 'System',
+    }
+
+    def __init__(self, pid, samples=60):
+        self.pid = int(pid)
+        self.ppid = 0
+        self.numThreads = 0
+        self.name = 'unknown'
+        self.terminated = False
+        self.iter = None
+        self.userCpu = DataSampler(samples)
+        self.systemCpu = DataSampler(samples)
+        self.sampleData()
+
+    def sampleData(self):
+        try:
+            stat = open('/proc/' + str(self.pid) + '/stat', 'r')
+            line = stat.read().strip()
+            stat.close()
+            #
+            # parse PID (progname) ...
+            #
+            a = line.index('(')
+            b = line.rindex(')')
+            self.name = line[a+1:b]
+
+            items = line[b+1:].strip().split(' ')
+
+            self.state      = items[0]
+            self.ppid       = int(items[1])
+            self.pgrp       = int(items[2])
+            self.userTime   = int(items[11])
+            self.systemTime = int(items[12])
+            self.numThreads = int(items[17])
+
+            self.userCpu.sample(self.userTime)
+            self.systemCpu.sample(self.systemTime)
+
+            stat = open('/proc/' + str(self.pid) + '/statm', 'r')
+            items = stat.read().strip().split()
+            stat.close()
+
+            self.memUsage = 4096 * int(items[1])
+
+        except FileNotFoundError:
+            self.terminated = True
+
+    def getTypes():
+        return (str, int, str, int, int)
+
+    def getData(self):
+        return [
+            self.name,
+            self.pid,
+            self.procState[self.state],
+            cpuCorePercent(self.userCpu.getDelta(5) + self.systemCpu.getDelta(5)),
+            int(self.memUsage/1024)]
+
+
+class UserWindow(Gtk.ScrolledWindow):
+
+    def __init__(self):
+        Gtk.ScrolledWindow.__init__(self)
+
+        self.updateVScrollbar = -1
+        self.users = { i: UserInfo(i) for i in getUids() }
+
+        self.userStore = Gtk.ListStore(*UserInfo.getTypes())
+
+        for user in self.users.values():
+            user.sampleData()
+            user.iter = self.userStore.append(user.getData())
+
+        GObject.timeout_add(1000, self.updateUserStore)
+
+        self.userStore.set_sort_column_id(3, Gtk.SortType.DESCENDING)
+
+        userView = Gtk.TreeView(model = self.userStore)
+        userView.get_selection().set_mode(Gtk.SelectionMode.NONE)
+
+        progressRenderer = Gtk.CellRendererProgress()
+        textRenderer = Gtk.CellRendererText()
+
+        userCol = Gtk.TreeViewColumn('User', textRenderer, text=0)
+        userCol.set_sort_column_id(0)
+        userCol.props.resizable = True
+        userCol.props.reorderable = True
+        userView.append_column(userCol)
+
+        # model col 1 is uid
+        cpuCol = Gtk.TreeViewColumn('CPU', progressRenderer, value=2)
+        cpuCol.set_sort_column_id(2)
+        cpuCol.props.fixed_width = 100
+        cpuCol.props.expand = True
+        cpuCol.props.resizable = True
+        cpuCol.props.reorderable = True
+        userView.append_column(cpuCol)
+
+        cpuAvgCol = Gtk.TreeViewColumn('CPU Avg', progressRenderer, value=3)
+        cpuAvgCol.set_sort_column_id(3)
+        cpuAvgCol.props.fixed_width = 100
+        cpuAvgCol.props.expand = True
+        cpuAvgCol.props.resizable = True
+        cpuAvgCol.props.reorderable = True
+        userView.append_column(cpuAvgCol)
+
+        memCol = Gtk.TreeViewColumn('Memory', progressRenderer, value=4)
+        memCol.set_sort_column_id(4)
+        memCol.props.fixed_width = 100
+        memCol.props.expand = True
+        memCol.props.resizable = True
+        memCol.props.reorderable = True
+        userView.append_column(memCol)
+
+        cacheCol = Gtk.TreeViewColumn('Cache', progressRenderer, value=5)
+        cacheCol.set_sort_column_id(5)
+        cacheCol.props.fixed_width = 100
+        cacheCol.props.expand = True
+        cacheCol.props.resizable = True
+        cacheCol.props.reorderable = True
+        userView.append_column(cacheCol)
+
+        userView.show_all()
+        self.add(userView)
+
+    def updateUserStore(self):
+        uids = getUids()
+        #
+        # check for new users
+        #
+        for uid in uids:
+            if uid not in self.users:
+                self.updateVScrollbar = self.get_vscrollbar().get_value() 
+                self.users[uid] = UserInfo(uid)
+                self.users[uid].iter = self.userStore.append(self.users[uid].getData())
+        #
+        # check for logged out users
+        #
+        for uid in list(self.users):
+            if uid not in uids:
+                self.userStore.remove(self.users[uid].iter)
+                del self.users[uid]
+
+        #
+        # collect process data
+        #
+        for row in self.userStore:
+            uid = row[1]
+            self.users[uid].sampleData()
+            row[:] = self.users[uid].getData()
+
+        #
+        # ugly hack to restore relative window position
+        #
+        if self.updateVScrollbar >= 0 and \
+            self.get_vscrollbar().get_value() != self.updateVScrollbar:
+            self.get_vscrollbar().set_value(self.updateVScrollbar)
+            self.updateVScrollbar = -1
+
+        return True
+
+
+class ProcWindow(Gtk.ScrolledWindow):
+
+    def __init__(self):
+        Gtk.ScrolledWindow.__init__(self)
+
+        self.updateVScrollbar = -1
+        self.procs = { i: ProcInfo(i) for i in getPids() }
+
+        self.procStore = Gtk.ListStore(*ProcInfo.getTypes())
+        for proc in self.procs.values():
+            proc.sampleData()
+            proc.iter = self.procStore.append(proc.getData())
+
+        GObject.timeout_add(1000, self.updateProcStore)
+
+        self.procStore.set_sort_column_id(3, Gtk.SortType.DESCENDING)
+
+        procView = Gtk.TreeView(model = self.procStore)
+        procView.get_selection().set_mode(Gtk.SelectionMode.NONE)
+
+        progressRenderer = Gtk.CellRendererProgress()
+        textRenderer = Gtk.CellRendererText()
+
+        nameCol = Gtk.TreeViewColumn('Process', textRenderer, text=0)
+        nameCol.set_sort_column_id(0)
+        nameCol.props.resizable = True
+        nameCol.props.reorderable = True
+        procView.append_column(nameCol)
+
+        pidCol = Gtk.TreeViewColumn('PID', textRenderer, text=1)
+        pidCol.set_sort_column_id(1)
+        pidCol.props.fixed_width = 100
+        pidCol.props.expand = True
+        pidCol.props.resizable = True
+        pidCol.props.reorderable = True
+        procView.append_column(pidCol)
+
+        stateCol = Gtk.TreeViewColumn('State', textRenderer, text=2)
+        stateCol.set_sort_column_id(2)
+        stateCol.props.fixed_width = 100
+        stateCol.props.expand = True
+        stateCol.props.resizable = True
+        stateCol.props.reorderable = True
+        procView.append_column(stateCol)
+
+        cpuCol = Gtk.TreeViewColumn('CPU', progressRenderer, value=3)
+        cpuCol.set_sort_column_id(3)
+        cpuCol.props.fixed_width = 100
+        cpuCol.props.expand = True
+        cpuCol.props.resizable = True
+        cpuCol.props.reorderable = True
+        procView.append_column(cpuCol)
+
+        memCol = Gtk.TreeViewColumn('Memory (kB)', textRenderer, text=4)
+        memCol.set_sort_column_id(4)
+        memCol.props.fixed_width = 100
+        memCol.props.expand = True
+        memCol.props.resizable = True
+        memCol.props.reorderable = True
+        procView.append_column(memCol)
+
+        procView.show_all()
+        self.add(procView)
+
+    def updateProcStore(self):
+        #
+        # check for new processes
+        #
+        for pid in getPids():
+            if pid not in self.procs:
+                self.updateVScrollbar = self.get_vscrollbar().get_value() 
+                self.procs[pid] = ProcInfo(pid)
+                self.procs[pid].iter = self.procStore.append(self.procs[pid].getData())
+
+        #
+        # check for terminated processes
+        #
+        for pid in list(self.procs):
+            if self.procs[pid].terminated:
+                self.procStore.remove(self.procs[pid].iter)
+                del self.procs[pid]
+
+        #
+        # collect process data
+        #
+        for row in self.procStore:
+            pid = row[1]
+            self.procs[pid].sampleData()
+            row[:] = self.procs[pid].getData()
+
+        #
+        # ugly hack to restore relative window position
+        #
+        if self.updateVScrollbar >= 0 and \
+            self.get_vscrollbar().get_value() != self.updateVScrollbar:
+            self.get_vscrollbar().set_value(self.updateVScrollbar)
+            self.updateVScrollbar = -1
+
+        return True
+
+
+class WatlahmWindow(Gtk.Window):
+
+    def __init__(self):
+        Gtk.Window.__init__(self, title=os.uname().nodename + ' is watlahm!')
+
+        if not os.path.isdir('/sys/fs/cgroup/cpu,cpuacct/user'):
+            dialog = Gtk.MessageDialog(
+                parent=self,
+                title='Watlahm Error',
+                flags=Gtk.DialogFlags.MODAL,
+                type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.OK,
+                message_format="Watlahm cannot run on this host.")
+            dialog.format_secondary_text(
+                "This host has no fair share cgroups configured.")
+            dialog.run()
+            dialog.destroy()
+            sys.exit(0)
+
+        icon = 'utilities-system-monitor'
+        self.set_icon_list(
+            list(map(
+                lambda i: Gtk.IconTheme.get_default().load_icon(icon, i, 0),
+                [24, 32, 48, 64, 96]))
+        )
+        self.set_default_size(640, 720)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        self.add(vbox)
+
+        stack = Gtk.Stack()
+        stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        #stack.set_transition_type(Gtk.StackTransitionType.OVER_LEFT_RIGHT)
+        stack.set_transition_duration(500)
+
+        userWindow = UserWindow()
+        stack.add_titled(userWindow, 'users', 'Users')
+
+        procWindow = ProcWindow()
+        stack.add_titled(procWindow, 'procs', 'My Processes')
+
+        stackSwitcher = Gtk.StackSwitcher()
+        stackSwitcher.set_stack(stack)
+
+        vbox.pack_start(stackSwitcher, False, True, 0)
+        vbox.pack_start(stack, True, True, 0)
+
+
+win = WatlahmWindow()
+win.connect("destroy", Gtk.main_quit)
+win.show_all()
+
+Gtk.main()
+
