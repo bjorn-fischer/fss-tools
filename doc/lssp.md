@@ -1,4 +1,4 @@
-# lssp
+# lssp [(source)](../lssp)
 
 This simple shell script checks, if all processes of a user are still attached
 to the corresponding cgroup. It can be used to check your own processes, the
