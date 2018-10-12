@@ -1,4 +1,4 @@
-# confine_user
+# [confine_user](confine_user)
 
 This shell script creates a cgroup for a user. It is designed to be used
 with *sudo(1m)* and should be executed during the login process. **Caveat emptor:
