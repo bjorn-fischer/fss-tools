@@ -10,7 +10,7 @@ The shell scripts [`confine_user`](doc/confine_user.md) and [`tl-wrapper`](doc/t
 And finally, [`watlahm`](doc/watlahm.md) is a GUI tool written in Python 3 and GTK. This tool resembles a top(1) like application which is cgroup aware and is primarily for the users on the system.
 
 If you deploy fair share scheduling using these scripts on a system with `systemd(1)`, you will probably run into some issues,
-most notably `systemd` and `onfine_user` fighting over control of the users processes. See below for possible mitigations.
+most notably `systemd` and `confine_user` fighting over control of the users processes. See below for possible mitigations.
 
 ## Motivation
 
@@ -151,3 +151,44 @@ This actually works fine for  service units like http servers, but it seems unfi
 #### Deviant Methods
 
 My last approach was to disable userland systemd completely by removing `pam_systemd.so` from the pam configuration.
+I am a bit reluctant to propose this method as a general solution for any system, as I am not aware of all implications
+this may have. If you disable userland systemd, there will be no `user.slice` at all. All user processes and sessions will
+stay attached to the ThinLinc `vsmagent` process, and it will be most certainly impossible to run the GNOME desktop.
+
+If you decide to give this approach a try, you need to modify your ThinLinc agent installation. By default the ThinLinc
+agent service is installed as a legacy SysVinit service in `/etc/init.d/vsmagent`. When the service is started by systemd, the systemd wrapper will automatically generate a service unit with the delegation feature disabled. You need to convert the init script into a native systemd service. Start by stopping and disabling the vsmagent service. Then move `/etc/init.d/vsmagent` somewhere else and change a few lines at the beginning of the file:
+
+    -. /opt/thinlinc/libexec/functions
+    +#. /opt/thinlinc/libexec/functions
+     
+    -systemctl_redirect "${service}" "${description}" "$1"
+    +#systemctl_redirect "${service}" "${description}" "$1"
+     
+     case "$1" in
+         'start')
+             echo "Starting" ${description}
+ 
+             # Run through Bash to get correct locale
+    -        ${SHELL} --login -c /opt/thinlinc/sbin/${service}
+    +        #${SHELL} --login -c /opt/thinlinc/sbin/${service}
+    +        /opt/thinlinc/sbin/${service}
+             RETVAL=$?
+             if [ "${RETVAL}" = "0" ]; then
+
+Create the file `/etc/systemd/system/vsmagent.service` with the following contents
+
+    [Unit]
+    Description=VSM Agent
+    
+    [Service]
+    Type=forking
+    PIDFile=/var/run/vsmagent.pid
+    ExecStart=/usr/local/share/exec/vsmagent start
+    ExecStop=/usr/local/share/exec/vsmagent stop
+    Delegate=cpu,cpuacct
+    
+    [Install]
+    WantedBy=multi-user.target
+
+and enable and start the vsmagent service again. Then you can deploy the fair share scheduling and the user processes will stay
+in their corresponding cgroups.
