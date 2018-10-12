@@ -42,8 +42,6 @@ scheduling feature of the Linux kernel which is controlled by the
 cgoups API. With fair share scheduling enabled, a user can aquire all
 CPU resources he/she wants as long as there is idle time on the
 system. When CPU time is exhausted the scheduler splits CPU time
-
-
 equally across all demanding users. In other words the user cannot
 single-handedly slow down the whole system.
 
