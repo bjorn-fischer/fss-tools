@@ -1,4 +1,4 @@
-# watlahm
+# watlahm [(source)](../watlahm)
 
 On a multi-user system with fair share scheduling enforced,
 a user should not be able to slow down the whole system. But the user
