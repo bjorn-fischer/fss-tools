@@ -1,9 +1,8 @@
 # confine_user
 
 This shell script creates a cgroup for a user. It is designed to be used
-with sudo(1m) and should be executed during the login process. **Caveat emptor:
-The software was written with security in mind, but it never
-has been audited thoroughly.**
+with *sudo(1m)* and should be executed during the login process. **Caveat emptor:
+The software was written with security in mind but has never been audited thoroughly.**
 
 Root can use the script to reconfine users who have processes that have
 dropped out of the user's cgroup somehow. Just run `confine_user` with the
