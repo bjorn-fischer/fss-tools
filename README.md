@@ -7,7 +7,7 @@ The shell scripts [`confine_user`](https://github.com/bjorn-fischer/fss-tools/bl
 
 [`lssp`](https://github.com/bjorn-fischer/fss-tools/blob/master/doc/lssp.md) is a small shell script to check whether all processes are confined properly.
 
-And finally, [`watlahm`](/bjorn-fischer/fss-tools/blob/master/doc/watlahm.md) is a GUI tool written in Python 3 and GTK. This tool resembles a top(1) like application which is cgroup aware and is primarily for the users on the system.
+And finally, [`watlahm`](doc/watlahm.md) is a GUI tool written in Python 3 and GTK. This tool resembles a top(1) like application which is cgroup aware and is primarily for the users on the system.
 
 ## Motivation
 
