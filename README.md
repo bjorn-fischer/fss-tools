@@ -3,6 +3,12 @@ Tools and scripts for deploying the Linux fair share scheduler on
 multi-user systems, scheduling users against each other instead of processes.
 This covers the deployment on [ThinLinc](https://www.cendio.com/ "ThinLinc by Cendio") agent hosts. Other scenarios may apply.
 
+The shell scripts [`confine_user`](https://github.com/bjorn-fischer/fss-tools/blob/master/doc/confine_user.md) and [`tl-wrapper`](https://github.com/bjorn-fischer/fss-tools/blob/master/doc/tl-wrapper.md) are used to set up the user cgroup during the login process.
+
+[`lssp`](https://github.com/bjorn-fischer/fss-tools/blob/master/doc/lssp.md) is a small shell script to check whether all processes are confined properly.
+
+And finally, [`watlahm`](/bjorn-fischer/fss-tools/blob/master/doc/watlahm.md) is a GUI tool written in Python 3 and GTK. This tool resembles a top(1) like application which is cgroup aware and is primarily for the users on the system.
+
 ## Motivation
 
 On our site we are currently experimenting with fair share scheduling
@@ -134,4 +140,6 @@ Another way of setting properties of systemd units is `systemctl set-property`, 
     Failed to set unit properties on user@12345.service:
     Cannot set property DelegateControllers, or unknown property.
 
+#### Using systemd resource control directly
 
+https://www.freedesktop.org/wiki/Software/systemd/ControlGroupInterface/
