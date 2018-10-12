@@ -7,7 +7,7 @@ The shell scripts [`confine_user`](doc/confine_user.md) and [`tl-wrapper`](doc/t
 
 [`lssp`](doc/lssp.md) is a small shell script to check whether all processes are confined properly.
 
-And finally, [`watlahm`](doc/watlahm.md) is a GUI tool written in Python 3 and GTK. This tool resembles a top(1) like application which is cgroup aware and is primarily for the users on the system.
+And finally, [`watlahm`](doc/watlahm.md) is a GUI tool written in Python 3 and GTK. This tool resembles a `top(1)` like application which is cgroup aware and is primarily for the users on the system.
 
 If you deploy fair share scheduling using these scripts on a system with `systemd(1)`, you will probably run into some issues,
 most notably `systemd` and `confine_user` fighting over control of the users processes. See below for possible mitigations.
