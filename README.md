@@ -9,6 +9,9 @@ The shell scripts [`confine_user`](doc/confine_user.md) and [`tl-wrapper`](doc/t
 
 And finally, [`watlahm`](doc/watlahm.md) is a GUI tool written in Python 3 and GTK. This tool resembles a top(1) like application which is cgroup aware and is primarily for the users on the system.
 
+If you deploy fair share scheduling using these scripts on a system with `systemd(1)`, you will probably run into some issues,
+most notably `systemd` and `onfine_user` fighting over control of the users processes. See below for possible mitigations.
+
 ## Motivation
 
 On our site we are currently experimenting with fair share scheduling
@@ -32,7 +35,7 @@ science app suddenly generates lots of load. These situations lead
 to lags for all users on the system deteriorating the general
 user experience.
 
-### Solution: Fair Share Scheduler
+### Solution: Fair Share Scheduling
 
 In order to fix that problem we are experimenting with the fair share
 scheduling feature of the Linux kernel which is controlled by the
@@ -126,7 +129,7 @@ session and an independent ssh session.
 Systemd creates a cgroup for each unit, i.e. every slice, scope and service in the tree above, and puts all
 processes belonging to that unit into the corresponding cgroup. Processes cannot be assigned to different cgroups with the same controller. So if you have created your own cgroup `cpu:/user/usera` and attached all of usera's processes to that cgroup, systemd will grab them and put them back into its own cgroup hierarchy -- unless you use the [delegation](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md) feature of systemd units. By properly setting the `Delegate` property you can exclude a unit (and all its sub-units) from systemd's cgroup resource control.
 
-Unfortunately, the delegate feature [is not available for slices](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md#some-donts), by design. Otherwise it would be quite simple to delegate the cgroup resource control for the whole `user.slice` and deploy fair share scheduling as mentioned above. But it even gets worse. It seems that scopes are not templateable like the `user@.service`. In the tree above you can template the `user@12345.service` (*any* `user@.service`, i.e.) by creating `/etc/systemd/system/user@.service`. In that file you can use the `Delegate` property and systemd would not touch the processes in that unit any more. But we need *all* the user's processes under our control.
+Unfortunately, the delegate feature [is not available for slices](https://github.com/systemd/systemd/blob/master/docs/CGROUP_DELEGATION.md#some-donts), by design. Otherwise it would be quite simple to delegate the cgroup resource control for the whole `user.slice` and deploy fair share scheduling as mentioned above. But it even gets worse. It seems that scopes are not templatable like the `user@.service`. In the tree above you can template the `user@12345.service` (*any* `user@.service`, i.e.) by creating `/etc/systemd/system/user@.service`. In that file you can use the `Delegate` property and systemd would not touch the processes in that unit any more. But we need *all* the user's processes under our control.
 
 Another way of setting properties of systemd units is `systemctl set-property`, but in this case it will not help at all as just the Delegate property is not settable:
 
@@ -142,4 +145,9 @@ Another way of setting properties of systemd units is `systemctl set-property`, 
 
 #### Using systemd resource control directly
 
-https://www.freedesktop.org/wiki/Software/systemd/ControlGroupInterface/
+The next thing I tried was using systemd's native [Control Group Interfaces](https://www.freedesktop.org/wiki/Software/systemd/ControlGroupInterface/). You can set properties like `CPUAccounting` and `CPUShares` directly for service units.
+This actually works fine for  service units like http servers, but it seems unfit for deploying fair share scheduling.
+
+#### Deviant Methods
+
+My last approach was to disable userland systemd completely by removing `pam_systemd.so` from the pam configuration.
