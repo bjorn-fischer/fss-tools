@@ -55,7 +55,7 @@ fi
 # CAVEAT: In LXD containers /proc/meminfo somtimes reports
 #         incorrect values
 #
-totalk=`fgrep MemTotal: /proc/meminfo | awk '{ print $2 }'`
+totalk=`awk '/MemTotal:/{ print $2 }' /proc/meminfo`
 memk=`expr $totalk / $mem_frac`
 
 # This is optional:
