@@ -26,7 +26,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #
-# Let users have 10% of RAM and 512 cpu shares
+# Let users have 1/10 of RAM and 512 cpu shares
 #
 mem_frac=10
 cpu_shares=512
